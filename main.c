@@ -1,16 +1,16 @@
 /******************************************************************************
 * File Name:   main.c
 *
-* Version:     1.0.0
-*
-* Description: This is the source code for the Switching Power Modes Example
-*              for ModusToolbox.
+* Description: This example demonstrates how to transition PSoC® 6 MCU to the 
+*              following system and MCU power states:
+*              - System power states - Normal Power state / Low Power state
+*              - MCU power states - Active / Sleep / Deep Sleep
 *
 * Related Document: See Readme.md
 *
 *
 *******************************************************************************
-* (c) (2019), Cypress Semiconductor Corporation. All rights reserved.
+* (c) (2019-2020), Cypress Semiconductor Corporation. All rights reserved.
 *******************************************************************************
 * This software, including source code, documentation and related materials
 * ("Software"), is owned by Cypress Semiconductor Corporation or one of its
@@ -41,22 +41,24 @@
 * indemnify Cypress against all liability.
 *******************************************************************************/
 
-#include "cy_pdl.h"
 #include "cyhal.h"
 #include "cybsp.h"
+#include "cyhal_clock.h"
 
 /*******************************************************************************
 * Macros
 ********************************************************************************/
-/* Constants to define LONG and SHORT presses on User Button */
+/* Constants to define LONG and SHORT presses on User Button (x10 = ms) */
 #define QUICK_PRESS_COUNT       2u      /* 20 ms < press < 200 ms */
 #define SHORT_PRESS_COUNT       20u     /* 200 ms < press < 2 sec */
 #define LONG_PRESS_COUNT        200u    /* press > 2 sec */
 
 /* PWM LED frequency constants (in Hz) */
-#define PWM_FAST_FREQ           5
-#define PWM_SLOW_FREQ           3
-#define PWM_DIM_FREQ            100
+#define PWM_FAST_FREQ_HZ        5
+#define PWM_SLOW_FREQ_HZ        3
+#define PWM_DIM_FREQ_HZ         100
+
+/* PWM Duty cycles (Active Low, in %) */
 #define PWM_50P_DUTY_CYCLE      50.0f
 #define PWM_10P_DUTY_CYCLE      90.0f
 #define PWM_100P_DUTY_CYCLE     0.0f
@@ -64,14 +66,17 @@
 /* Clock frequency constants (in Hz) */
 #define CLOCK_50_MHZ            50000000u
 #define CLOCK_100_MHZ           100000000u
-#define SYSTEM_CLOCK            0u
+
+/* Glitch delays */
+#define SHORT_GLITCH_DELAY_MS   10u     /* in ms */
+#define LONG_GLITCH_DELAY_MS    100u    /* in ms */
 
 typedef enum
 {
-    SWITCH_NO_EVENT		= 0u,
-	SWITCH_QUICK_PRESS  = 1u,
-	SWITCH_SHORT_PRESS	= 2u,
-	SWITCH_LONG_PRESS   = 3u,
+    SWITCH_NO_EVENT     = 0u,
+    SWITCH_QUICK_PRESS  = 1u,
+    SWITCH_SHORT_PRESS  = 2u,
+    SWITCH_LONG_PRESS   = 3u,
 } en_switch_event_t;
 
 /*****************************************************************************
@@ -80,29 +85,26 @@ typedef enum
 en_switch_event_t get_switch_event(void);
 
 /* Power callbacks */
-cy_en_syspm_status_t pwm_sleep_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode);
-cy_en_syspm_status_t pwm_deepsleep_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode);
-cy_en_syspm_status_t pwm_enter_lp_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode);
-cy_en_syspm_status_t pwm_enter_ulp_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode);
-cy_en_syspm_status_t clock_enter_lp_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode);
-cy_en_syspm_status_t clock_enter_ulp_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode);
+bool pwm_power_callback(cyhal_syspm_callback_state_t state, cyhal_syspm_callback_mode_t mode, void *arg);
+bool clk_power_callback(cyhal_syspm_callback_state_t state, cyhal_syspm_callback_mode_t mode, void *arg);
 
 /*******************************************************************************
 * Global Variables
 ********************************************************************************/
 /* HAL Objects */
 cyhal_pwm_t pwm;
+cyhal_clock_t system_clock;
 
 /*******************************************************************************
 * Function Name: main
 ********************************************************************************
 * Summary:
-* This is the main function for CM4 CPU. It does...
-*    1. Register sleep callbacks.
-*    2. Initialize the PWM block that controls the LED brightness.
+* This is the main function for the MCU. It does...
+*    1. Initialize the PWM block that controls the LED brightness.
+*    2. Register power management callbacks.
 *    Do Forever loop:
-*    3. Check if KIT_BTN1 was pressed and for how long.
-*    4. If quickly pressed, swap from Low Power (LP) to Ultra-LP (vice-versa).
+*    3. Check if User button was pressed and for how long.
+*    4. If quickly pressed, swap from Normal Power to Low Power state.
 *    5. If short pressed, go to sleep.
 *    6. If long pressed, go to deep sleep.
 *
@@ -118,12 +120,6 @@ int main(void)
     /* API return code */
     cy_rslt_t result;
 
-    /* SysPm callback params */
-	cy_stc_syspm_callback_params_t callbackParams = {
-	    /*.base       =*/ NULL,
-	    /*.context    =*/ NULL
-	};
-
     /* Initialize the device and board peripherals */
     result = cybsp_init() ;
     if (result != CY_RSLT_SUCCESS)
@@ -135,79 +131,55 @@ int main(void)
     __enable_irq();
     
     /* Initialize the User Button */
-    cyhal_gpio_init((cyhal_gpio_t) CYBSP_USER_BTN, CYHAL_GPIO_DIR_INPUT, CYHAL_GPIO_DRIVE_PULLUP, CYBSP_BTN_OFF);
-    cyhal_gpio_enable_event((cyhal_gpio_t) CYBSP_USER_BTN, CYHAL_GPIO_IRQ_FALL, CYHAL_ISR_PRIORITY_DEFAULT, true);
+    cyhal_gpio_init(CYBSP_USER_BTN, CYHAL_GPIO_DIR_INPUT, CYHAL_GPIO_DRIVE_PULLUP, CYBSP_BTN_OFF);
+    /* Enable the GPIO interrupt to wake-up the device */
+    cyhal_gpio_enable_event(CYBSP_USER_BTN, CYHAL_GPIO_IRQ_FALL, CYHAL_ISR_PRIORITY_DEFAULT, true);
 
-    /* Initialize the TPWM resource for PWM operation */
-    cyhal_pwm_init(&pwm, (cyhal_gpio_t) CYBSP_USER_LED, NULL);
-    cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_FAST_FREQ);
+    /* Initialize the PWM to control LED brightness */
+    cyhal_pwm_init(&pwm, CYBSP_USER_LED, NULL);
+    cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_FAST_FREQ_HZ);
     cyhal_pwm_start(&pwm);
 
-    /* Callback declaration for Power Modes */
-    cyhal_system_callback_t pwmSleepCb =     {pwm_sleep_callback,       /* Callback function */
-                                              CY_SYSPM_SLEEP,           /* Callback type */
-                                              CY_SYSPM_SKIP_CHECK_READY |
-                                              CY_SYSPM_SKIP_CHECK_FAIL, /* Skip mode */
-                                              &callbackParams,          /* Callback params */
-                                              NULL, NULL};              /* For internal use */
-    cyhal_system_callback_t pwmDeepSleepCb = {pwm_deepsleep_callback,   /* Callback function */
-                                              CY_SYSPM_DEEPSLEEP,       /* Callback type */
-                                              CY_SYSPM_SKIP_CHECK_READY |
-                                              CY_SYSPM_SKIP_CHECK_FAIL, /* Skip mode */
-											  &callbackParams,		    /* Callback params */
-                                              NULL, NULL};              /* For internal use */
-    cyhal_system_callback_t pwmEnterUlpCb =  {pwm_enter_ulp_callback,   /* Callback function */
-										      CY_SYSPM_ULP,             /* Callback type */
-                                              CY_SYSPM_SKIP_BEFORE_TRANSITION |
-                                              CY_SYSPM_SKIP_CHECK_READY |
-                                              CY_SYSPM_SKIP_CHECK_FAIL, /* Skip mode */
-											  &callbackParams,		    /* Callback params */
-                                              NULL, NULL};				/* For internal usage */
-    cyhal_system_callback_t pwmEnterLpCb =   {pwm_enter_lp_callback,    /* Callback function */
-										      CY_SYSPM_LP,				/* Callback type */
-                                              CY_SYSPM_SKIP_BEFORE_TRANSITION |
-                                              CY_SYSPM_SKIP_CHECK_READY |
-                                              CY_SYSPM_SKIP_CHECK_FAIL, /* Skip mode */
-											  &callbackParams,		    /* Callback params */
-                                              NULL, NULL};				/* For internal usage */                                              
-    cyhal_system_callback_t clkEnterUlpCb =  {clock_enter_ulp_callback, /* Callback function */
-										      CY_SYSPM_ULP,             /* Callback type */
-                                              CY_SYSPM_SKIP_AFTER_TRANSITION |
-                                              CY_SYSPM_SKIP_CHECK_READY |
-                                              CY_SYSPM_SKIP_CHECK_FAIL, /* Skip mode */
-											  &callbackParams,		    /* Callback params */
-                                              NULL, NULL};              /* For internal usage */
-    cyhal_system_callback_t clkEnterLpCb =   {clock_enter_lp_callback,  /* Callback function */
-										      CY_SYSPM_LP,			    /* Callback type */
-                                              CY_SYSPM_SKIP_BEFORE_TRANSITION |
-                                              CY_SYSPM_SKIP_CHECK_READY |
-                                              CY_SYSPM_SKIP_CHECK_FAIL, /* Skip mode */
-										  	  &callbackParams,          /* Callback params */
-                                              NULL, NULL};              /* For internal usage */
-   
-    /* Callback registration */
-    cyhal_system_register_callback(&pwmSleepCb); 
-    cyhal_system_register_callback(&pwmDeepSleepCb);
-    cyhal_system_register_callback(&pwmEnterUlpCb); 
-    cyhal_system_register_callback(&pwmEnterLpCb); 
-    cyhal_system_register_callback(&clkEnterUlpCb); 
-    cyhal_system_register_callback(&clkEnterLpCb); 
+    /* Init the system clock (based on FLL) to enable frequency changes later */
+    cyhal_clock_get(&system_clock, &CYHAL_CLOCK_FLL);
+    cyhal_clock_init(&system_clock);
 
+    /* Callback declaration for Power Modes */
+    cyhal_syspm_callback_data_t pwm_callback = {pwm_power_callback,             /* Callback function */
+                                                CYHAL_SYSPM_CALLBACK_STATE_ALL, /* Power States supported */
+                                                CYHAL_SYSPM_CHECK_FAIL,         /* Modes to ignore */
+                                                NULL,                           /* Callback Argument */
+                                                NULL};                          /* For internal use */
+
+    cyhal_syspm_callback_data_t clk_callback = {clk_power_callback,             /* Callback function */
+                                                CYHAL_SYSPM_CALLBACK_STATE_ALL, /* Power States supported */
+                                                CYHAL_SYSPM_CHECK_READY |       /* Modes to ignore */
+                                                CYHAL_SYSPM_CHECK_FAIL,
+                                                NULL,                           /* Callback Argument */
+                                                NULL};                          /* For internal use */
+
+    /* Initialize the System Power Management */
+    cyhal_syspm_init();
+
+    /* Power Management Callback registration */
+    cyhal_syspm_register_callback(&clk_callback);
+    cyhal_syspm_register_callback(&pwm_callback);
+    
     for(;;)
     {
         switch (get_switch_event())
         {
             case SWITCH_QUICK_PRESS:
-                /* Check if the device is in System ULP mode */
-                if (Cy_SysPm_IsSystemUlp())
+                /* Check if the device is in System Low Power state */
+                if (cyhal_syspm_get_system_state() == CYHAL_SYSPM_SYSTEM_LOW)
                 {
-                    /* Switch to System LP mode */
-                    Cy_SysPm_SystemEnterLp();
+                    /* Switch to System Normal Power state */
+                    cyhal_syspm_set_system_state(CYHAL_SYSPM_SYSTEM_NORMAL);
                 }
                 else
                 {
-                    /* Switch to ULP mode */
-                    Cy_SysPm_SystemEnterUlp();
+                    /* Switch to System Low Power state */
+                    cyhal_syspm_set_system_state(CYHAL_SYSPM_SYSTEM_LOW);
                 }
                 break;
             
@@ -216,7 +188,7 @@ int main(void)
                 cyhal_system_sleep();
 
                 /* Wait a bit to avoid glitches from the button press */
-                Cy_SysLib_Delay(100);
+                cyhal_system_delay_ms(LONG_GLITCH_DELAY_MS);
                 break;
 
             case SWITCH_LONG_PRESS:
@@ -224,7 +196,7 @@ int main(void)
                 cyhal_system_deepsleep();
 
                 /* Wait a bit to avoid glitches from the button press */
-                Cy_SysLib_Delay(100);
+                cyhal_system_delay_ms(LONG_GLITCH_DELAY_MS);
                 break;
 
             default:
@@ -238,11 +210,10 @@ int main(void)
 ****************************************************************************//**
 * Summary:
 *  Returns how the User button was pressed:
-*  - SWITCH_NO_EVENT: No press or very quick press
+*  - SWITCH_NO_EVENT: No press 
+*  - SWITCH_QUICK_PRESS: Very quick press
 *  - SWITCH_SHORT_PRESS: Short press was detected
 *  - SWITCH_LONG_PRESS: Long press was detected
-*
-* Parameters:
 *
 * Return:
 *  Switch event that occurred, if any. 
@@ -257,7 +228,7 @@ en_switch_event_t get_switch_event(void)
     while (cyhal_gpio_read(CYBSP_USER_BTN) == CYBSP_BTN_PRESSED)
     {
         /* Wait for 10 ms */
-        Cy_SysLib_Delay(10);
+        cyhal_system_delay_ms(10);
 
         /* Increment counter. Each count represents 10 ms */
         pressCount++;
@@ -278,293 +249,134 @@ en_switch_event_t get_switch_event(void)
     }
 
     /* Add a delay to avoid glitches */
-    Cy_SysLib_Delay(10);
+    cyhal_system_delay_ms(SHORT_GLITCH_DELAY_MS);
 
     return event;
 }
 
 /*******************************************************************************
-* Function Name: pwm_sleep_callback
-****************************************************************************//**
+* Function Name: pwm_power_callback
+********************************************************************************
 * Summary:
-*  PWM Sleep callback implementation. It changes the LED behavior based on the
-*  System Mode.
-*  - LP Mode CPU Sleep  : LED is turned ON
-*  - ULP Mode CPU Sleep : LED is dimmed.
-*  Note that the LED brightness is controlled using the PWM block.
+*  Callback implementation for the PWM block. It changes the blinking pattern
+*  based on the power state and MCU state.
 *
 * Parameters:
-*  params: callback parameter. 
-*  mode: callback mode to operate.
+*  state - state the system or CPU is being transitioned into
+*  mode  - callback mode
+*  arg   - user argument (not used)
 *
 * Return:
-*  Returns CY_SYSPM_SUCCESS if succesful, otherwise CY_SYSPM_FAIL. 
+*  Always true
 *
 *******************************************************************************/
-cy_en_syspm_status_t pwm_sleep_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode)
+bool pwm_power_callback(cyhal_syspm_callback_state_t state, cyhal_syspm_callback_mode_t mode, void *arg)
 {
-    cy_en_syspm_status_t status = CY_SYSPM_FAIL;
+    (void) arg;
 
     /* Stop the PWM before applying any changes */
     cyhal_pwm_stop(&pwm);
 
-    switch (mode)
+    if (mode == CYHAL_SYSPM_BEFORE_TRANSITION)
     {
-        case CY_SYSPM_BEFORE_TRANSITION:
-            /* Check if the device is in System ULP mode */
-            if (Cy_SysPm_IsSystemUlp())
+        if (state == CYHAL_SYSPM_CB_CPU_SLEEP)
+        {
+            /* Check if the device is in Low Power Mode */
+            if (cyhal_syspm_get_system_state() == CYHAL_SYSPM_SYSTEM_LOW)
             {
-                /* Before going to ULP sleep mode, dim the LED at 10% */
-                cyhal_pwm_set_duty_cycle(&pwm, PWM_10P_DUTY_CYCLE, PWM_DIM_FREQ);
+                /* Before going to Low Power Sleep Mode, set LED brightness to 10% */
+                cyhal_pwm_set_duty_cycle(&pwm, PWM_10P_DUTY_CYCLE, PWM_DIM_FREQ_HZ);
             }
             else
             {
-                /* Before going to LP sleep mode, turn on the LED 100% */
-                cyhal_pwm_set_duty_cycle(&pwm, PWM_100P_DUTY_CYCLE, PWM_DIM_FREQ);
+                /* Before going to Normal Power Sleep Mode, set LED brightness to 100% */
+                cyhal_pwm_set_duty_cycle(&pwm, PWM_100P_DUTY_CYCLE, PWM_DIM_FREQ_HZ);
             }
-
-            status = CY_SYSPM_SUCCESS;
-            break;
-
-        case CY_SYSPM_AFTER_TRANSITION:
-            /* Check if the device is in System ULP mode */
-            if (Cy_SysPm_IsSystemUlp())
-            {
-                /* After waking up, set the slow blink pattern */
-                cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_SLOW_FREQ);
-            }
-            else
-            {
-                /* After waking up, set the fast blink pattern */
-                cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_FAST_FREQ);
-            }
-
-            status = CY_SYSPM_SUCCESS;
-            break;
-
-        default:
-            /* Don't do anything in the other modes */
-            status = CY_SYSPM_SUCCESS;
-            break;
-    }
-
-    /* Restart the PWM */
-    cyhal_pwm_start(&pwm);
-
-    return status;
-}
-
-/*******************************************************************************
-* Function Name: pwm_deepsleep_callback
-****************************************************************************//**
-* Summary:
-*  PWM Deep Sleep callback implementation. It turns the LED off before going
-*  to deep sleep power mode. After waking up, it sets the LED to blink.
-*
-* Parameters:
-*  params: callback parameter. 
-*  mode: callback mode to operate.
-*
-* Return:
-*  Returns CY_SYSPM_SUCCESS if succesful, otherwise CY_SYSPM_FAIL. 
-*
-*******************************************************************************/
-cy_en_syspm_status_t pwm_deepsleep_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode)
-{
-    cy_en_syspm_status_t status = CY_SYSPM_FAIL;
-
-    /* Stop the PWM before applying any changes */
-    cyhal_pwm_stop(&pwm);
-
-    switch (mode)
-    {
-        case CY_SYSPM_AFTER_TRANSITION:
-            /* Check if the device is in System ULP mode */
-            if (Cy_SysPm_IsSystemUlp())
-            {
-                /* After waking up, set the slow blink pattern */
-                cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_SLOW_FREQ);
-            }
-            else
-            {
-                /* After waking up, set the fast blink pattern */
-                cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_FAST_FREQ);
-            }
-
-            /* Re-enable the PWM (PDL level) */
-            Cy_TCPWM_PWM_Enable(pwm.base, pwm.resource.channel_num);
 
             /* Restart the PWM */
             cyhal_pwm_start(&pwm);
+        }
+    }
+    else if (mode == CYHAL_SYSPM_AFTER_TRANSITION)
+    {
+        switch (state)
+        {
+            case CYHAL_SYSPM_CB_CPU_SLEEP:
+            case CYHAL_SYSPM_CB_CPU_DEEPSLEEP:
+                /* Check if the device is in Low Power Mode */
+                if (cyhal_syspm_get_system_state() == CYHAL_SYSPM_SYSTEM_LOW)
+                {
+                    /* After waking up, set the slow blink pattern */
+                    cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_SLOW_FREQ_HZ);
+                }
+                else
+                {
+                    /* After waking up, set the fast blink pattern */
+                    cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_FAST_FREQ_HZ);
+                }
+                break;
 
-            status = CY_SYSPM_SUCCESS;
-            break;
+            case CYHAL_SYSPM_CB_SYSTEM_NORMAL:
+                /* Set fast blinking rate when in Normal Power state*/
+                cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_FAST_FREQ_HZ);
+                break;
 
-        default:
-            /* Don't do anything in the other modes */
-            status = CY_SYSPM_SUCCESS;
-            break;
+            case CYHAL_SYSPM_CB_SYSTEM_LOW:
+                /* Set slow blinking rate when in Low Power state */
+                cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_SLOW_FREQ_HZ);
+                break;
+
+            default:
+                break;
+        }
+
+        /* Restart the PWM */
+        cyhal_pwm_start(&pwm);
     }
 
-    return status;
+    return true;
 }
 
 /*******************************************************************************
-* Function Name: pwm_enter_lp_callback
-****************************************************************************//**
+* Function Name: clk_power_callback
+********************************************************************************
 * Summary:
-*  Enter System Low Power mode. It changes the LED pattern to blink faster.
+*  Callback implementation for the clocks. It swaps the system frequency between
+*  50 MHz and 100 MHz, depending on the power state.
 *
 * Parameters:
-*  params: callback parameter. 
-*  mode: callback mode to operate.
+*  state - state the system or CPU is being transitioned into
+*  mode  - callback mode
+*  arg   - user argument (not used)
 *
 * Return:
-*  Returns CY_SYSPM_SUCCESS if succesful, otherwise CY_SYSPM_FAIL. 
+*  Always true
 *
 *******************************************************************************/
-cy_en_syspm_status_t pwm_enter_lp_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode)
+bool clk_power_callback(cyhal_syspm_callback_state_t state, cyhal_syspm_callback_mode_t mode, void *arg)
 {
-    cy_en_syspm_status_t status = CY_SYSPM_FAIL;
+    (void) arg;
 
-    /* Stop the PWM before applying any changes */
-    cyhal_pwm_stop(&pwm);
-
-    switch (mode)
+    if (mode == CYHAL_SYSPM_AFTER_TRANSITION)
     {
-        case CY_SYSPM_AFTER_TRANSITION:
-
-            /* Set slow blink LED pattern */
-            cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_FAST_FREQ);
-
-            status = CY_SYSPM_SUCCESS;
-            break;
-
-        default:
-            /* Don't do anything in the other modes */
-            status = CY_SYSPM_SUCCESS;
-            break;
-    }
-
-    /* Restart the PWM */
-    cyhal_pwm_start(&pwm);
-
-    return status;
-}
-
-/*******************************************************************************
-* Function Name: pwm_enter_ulp_callback
-****************************************************************************//**
-* Summary:
-*  Enter System Low Power mode. It changes the LED pattern to blink slower.
-*
-* Parameters:
-*  params: callback parameter. 
-*  mode: callback mode to operate.
-*
-* Return:
-*  Returns CY_SYSPM_SUCCESS if succesful, otherwise CY_SYSPM_FAIL. 
-*
-*******************************************************************************/
-cy_en_syspm_status_t pwm_enter_ulp_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode)
-{
-    cy_en_syspm_status_t status = CY_SYSPM_FAIL;
-
-    /* Stop the PWM before applying any changes */
-    cyhal_pwm_stop(&pwm);
-
-    switch (mode)
-    {
-        case CY_SYSPM_AFTER_TRANSITION:
-            /* Set fast blink LED pattern */
-            cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_SLOW_FREQ);
-
-            status = CY_SYSPM_SUCCESS;
-            break;
-
-        default:
-            /* Don't do anything in the other modes */
-            status = CY_SYSPM_SUCCESS;
-            break;
-    }
-
-    /* Restart the PWM */
-    cyhal_pwm_start(&pwm);
-
-    return status;
-}
-
-/*******************************************************************************
-* Function Name: clock_enter_lp_callback
-****************************************************************************//**
-* Summary:
-*  Enter System Low Power mode. It sets the System Clock to 100 MHz.
-*
-* Parameters:
-*  params: callback parameter. 
-*  mode: callback mode to operate.
-*
-* Return:
-*  Returns CY_SYSPM_SUCCESS if succesful, otherwise CY_SYSPM_FAIL. 
-*
-*******************************************************************************/
-cy_en_syspm_status_t clock_enter_lp_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode)
-{
-    cy_en_syspm_status_t status = CY_SYSPM_FAIL;
-
-    switch (mode)
-    {
-        case CY_SYSPM_AFTER_TRANSITION:
-
+        if (state == CYHAL_SYSPM_CB_SYSTEM_NORMAL)
+        {
             /* Set the system clock to 100 MHz */
-            cyhal_system_clock_set_frequency(SYSTEM_CLOCK, CLOCK_100_MHZ);
-
-            status = CY_SYSPM_SUCCESS;
-            break;
-
-        default:
-            /* Don't do anything in the other modes */
-            status = CY_SYSPM_SUCCESS;
-            break;
+            cyhal_clock_set_frequency(&system_clock, CLOCK_100_MHZ, NULL);
+        }
     }
-
-    return status;
-}
-
-/*******************************************************************************
-* Function Name: clock_enter_ulp_callback
-****************************************************************************//**
-* Summary:
-*  Enter System Ultra Low Power mode. It sets the System Clock to 50 MHz.
-*
-* Parameters:
-*  params: callback parameter. 
-*  mode: callback mode to operate.
-*
-* Return:
-*  Returns CY_SYSPM_SUCCESS if succesful, otherwise CY_SYSPM_FAIL. 
-*
-*******************************************************************************/
-cy_en_syspm_status_t clock_enter_ulp_callback(cy_stc_syspm_callback_params_t *params, cy_en_syspm_callback_mode_t mode)
-{
-    cy_en_syspm_status_t status = CY_SYSPM_FAIL;
-
-    switch (mode)
+    else if (mode == CYHAL_SYSPM_BEFORE_TRANSITION)
     {
-        case CY_SYSPM_BEFORE_TRANSITION:
+        if (state == CYHAL_SYSPM_CB_SYSTEM_LOW)
+        {
             /* Set the System Clock to 50 MHz */
-            cyhal_system_clock_set_frequency(SYSTEM_CLOCK, CLOCK_50_MHZ);
-
-            status = CY_SYSPM_SUCCESS;
-            break;
-
-        default:
-            /* Don't do anything in the other modes */
-            status = CY_SYSPM_SUCCESS;
-            break;
+            cyhal_clock_set_frequency(&system_clock, CLOCK_50_MHZ, NULL);
+        }
     }
 
-    return status;
+    return true;
 }
+
+
 
 /* [] END OF FILE */
