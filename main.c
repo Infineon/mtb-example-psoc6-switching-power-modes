@@ -146,15 +146,25 @@ int main(void)
 
     /* Callback declaration for Power Modes */
     cyhal_syspm_callback_data_t pwm_callback = {pwm_power_callback,             /* Callback function */
-                                                CYHAL_SYSPM_CALLBACK_STATE_ALL, /* Power States supported */
-                                                CYHAL_SYSPM_CHECK_FAIL,         /* Modes to ignore */
+                                               (cyhal_syspm_callback_state_t)
+                                               (CYHAL_SYSPM_CB_CPU_SLEEP |
+                                                CYHAL_SYSPM_CB_CPU_DEEPSLEEP |
+                                                CYHAL_SYSPM_CB_SYSTEM_NORMAL |
+                                                CYHAL_SYSPM_CB_SYSTEM_LOW),     /* Power States supported */
+                                               (cyhal_syspm_callback_mode_t)
+                                               (CYHAL_SYSPM_CHECK_FAIL),        /* Modes to ignore */
                                                 NULL,                           /* Callback Argument */
                                                 NULL};                          /* For internal use */
 
     cyhal_syspm_callback_data_t clk_callback = {clk_power_callback,             /* Callback function */
-                                                CYHAL_SYSPM_CALLBACK_STATE_ALL, /* Power States supported */
-                                                CYHAL_SYSPM_CHECK_READY |       /* Modes to ignore */
-                                                CYHAL_SYSPM_CHECK_FAIL,
+                                               (cyhal_syspm_callback_state_t)
+                                               (CYHAL_SYSPM_CB_CPU_SLEEP |
+                                                CYHAL_SYSPM_CB_CPU_DEEPSLEEP |
+                                                CYHAL_SYSPM_CB_SYSTEM_NORMAL |
+                                                CYHAL_SYSPM_CB_SYSTEM_LOW),     /* Power States supported */
+                                               (cyhal_syspm_callback_mode_t)
+                                               (CYHAL_SYSPM_CHECK_READY |       
+                                                CYHAL_SYSPM_CHECK_FAIL),        /* Modes to ignore */
                                                 NULL,                           /* Callback Argument */
                                                 NULL};                          /* For internal use */
 
