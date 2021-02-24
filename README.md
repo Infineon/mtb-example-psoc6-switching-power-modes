@@ -4,7 +4,7 @@ This example demonstrates how to transition PSoC® 6 MCU to the following system
 - System power states - Normal Power state/Low Power state
 - MCU power states - Active/Sleep/Deep Sleep
 
-[Provide feedback on this Code Example.](https://cypress.co1.qualtrics.com/jfe/form/SV_1NTns53sK2yiljn?Q_EED=eyJVbmlxdWUgRG9jIElkIjoiQ0UyMTk4ODEiLCJTcGVjIE51bWJlciI6IjAwMi0xOTg4MSIsIkRvYyBUaXRsZSI6IlBTb0MgNiBNQ1U6IFN3aXRjaGluZyBCZXR3ZWVuIFBvd2VyIE1vZGVzIiwicmlkIjoicmxvcyIsIkRvYyB2ZXJzaW9uIjoiMi4wLjAiLCJEb2MgTGFuZ3VhZ2UiOiJFbmdsaXNoIiwiRG9jIERpdmlzaW9uIjoiTUNEIiwiRG9jIEJVIjoiSUNXIiwiRG9jIEZhbWlseSI6IlBTT0MifQ==)
+[Provide feedback on this Code Example.](https://cypress.co1.qualtrics.com/jfe/form/SV_1NTns53sK2yiljn?Q_EED=eyJVbmlxdWUgRG9jIElkIjoiQ0UyMTk4ODEiLCJTcGVjIE51bWJlciI6IjAwMi0xOTg4MSIsIkRvYyBUaXRsZSI6IlBTb0MgNiBNQ1U6IFN3aXRjaGluZyBCZXR3ZWVuIFBvd2VyIE1vZGVzIiwicmlkIjoicmxvcyIsIkRvYyB2ZXJzaW9uIjoiMi4xLjAiLCJEb2MgTGFuZ3VhZ2UiOiJFbmdsaXNoIiwiRG9jIERpdmlzaW9uIjoiTUNEIiwiRG9jIEJVIjoiSUNXIiwiRG9jIEZhbWlseSI6IlBTT0MifQ==)
 
 ## Overview
 
@@ -65,6 +65,7 @@ The project also uses one LED to indicate the selected power state.  Table 2 sho
 - [PSoC 62S1 Wi-Fi BT Pioneer Kit](https://www.cypress.com/CYW9P62S1-43012EVB-01) (`CYW9P62S1-43012EVB-01`)
 - [PSoC 62S3 Wi-Fi BT Prototyping Kit](https://www.cypress.com/CY8CPROTO-062S3-4343W) (`CY8CPROTO-062S3-4343W`)
 - [PSoC 64 Secure Boot Wi-Fi BT Pioneer Kit](http://www.cypress.com/CY8CKIT-064B0S2-4343W) (`CY8CKIT-064B0S2-4343W`)
+- Rapid IoT Connect Developer Kit (CYSBSYSKIT-DEV-01)
 
 ## Hardware Setup
 
@@ -233,7 +234,7 @@ Two power management callback functions are registered (PWM and Clock callbacks)
 | [CY8CPROTO-063-BLE](https://www.cypress.com/CY8CPROTO-063-BLE) PSoC 6 BLE Prototyping Kit | [CY8CPROTO-062-4343W](https://www.cypress.com/CY8CPROTO-062-4343W) PSoC 6 Wi-Fi BT Prototyping Kit |
 | [CY8CKIT-062S2-43012](https://www.cypress.com/CY8CKIT-062S2-43012) PSoC 62S2 Wi-Fi BT Pioneer Kit | [CY8CPROTO-062S3-4343W](https://www.cypress.com/CY8CPROTO-062S3-4343W) PSoC 62S3 Wi-Fi BT Prototyping Kit |
 | [CYW9P62S1-43438EVB-01](https://www.cypress.com/CYW9P62S1-43438EVB-01) PSoC 62S1 Wi-Fi BT Pioneer Kit | [CYW9P62S1-43012EVB-01](https://www.cypress.com/CYW9P62S1-43012EVB-01) PSoC 62S1 Wi-Fi BT Pioneer Kit |
-| [CY8CKIT-064B0S2-4343W](http://www.cypress.com/CY8CKIT-064B0S2-4343W) PSoC 64 Secure Boot Wi-Fi BT Pioneer Kit |
+| [CY8CKIT-064B0S2-4343W](http://www.cypress.com/CY8CKIT-064B0S2-4343W) PSoC 64 Secure Boot Wi-Fi BT Pioneer Kit | [CYSBSYSKIT-DEV-01] Rapid IoT Connect Developer Kit |
 | **Libraries**                                                |                                                              |
 | PSoC 6 Peripheral Driver Library (PDL) and docs  | [mtb-pdl-cat1](https://github.com/cypresssemiconductorco/mtb-pdl-cat1) on GitHub |
 | Cypress Hardware Abstraction Layer (HAL) Library and docs    | [mtb-hal-cat1](https://github.com/cypresssemiconductorco/mtb-hal-cat1) on GitHub |
@@ -260,6 +261,7 @@ Document Title: *CE219881* - *PSoC 6 MCU: Switching Between Power Modes*
 | 1.0.0   | New code example      |
 | 1.1.0   | Updated to support ModusToolbox software v2.1<br />Updated to use HAL drivers for power management |
 | 2.0.0   | Major update to support ModusToolbox software v2.2, added support for new kits<br /> This version is not backward compatible with ModusToolbox software v2.1  |
+| 2.1.0   | Added support for CYSBSYSKIT-DEV-01 Rapid IoT Connect Developer Kit |
 ------
 
 All other trademarks or registered trademarks referenced herein are the property of their respective owners.
