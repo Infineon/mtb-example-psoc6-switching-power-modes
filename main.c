@@ -10,7 +10,7 @@
 *
 *
 *******************************************************************************
-* Copyright 2019-2021, Cypress Semiconductor Corporation (an Infineon company) or
+* Copyright 2019-2022, Cypress Semiconductor Corporation (an Infineon company) or
 * an affiliate of Cypress Semiconductor Corporation.  All rights reserved.
 *
 * This software, including source code, documentation and related
@@ -71,6 +71,9 @@
 /* Glitch delays */
 #define SHORT_GLITCH_DELAY_MS   10u     /* in ms */
 #define LONG_GLITCH_DELAY_MS    100u    /* in ms */
+
+/* User button press delay*/
+#define USER_BTN_PRESS_DELAY    10u     /* in ms */
 
 typedef enum
 {
@@ -141,9 +144,14 @@ int main(void)
     cyhal_pwm_set_duty_cycle(&pwm, PWM_50P_DUTY_CYCLE, PWM_FAST_FREQ_HZ);
     cyhal_pwm_start(&pwm);
 
-    /* Init the system clock (based on FLL) to enable frequency changes later */
-    cyhal_clock_get(&system_clock, &CYHAL_CLOCK_FLL);
-    cyhal_clock_init(&system_clock);
+    /* Reserve, take ownership of, the specified clock instance*/
+    result = cyhal_clock_reserve(&system_clock, &CYHAL_CLOCK_FLL);
+
+// If the clock is not already enabled, enable it
+    if (!cyhal_clock_is_enabled(&system_clock))
+    {
+        result = cyhal_clock_set_enabled(&system_clock, true, true);
+    }
 
     /* Callback declaration for Power Modes */
     cyhal_syspm_callback_data_t pwm_callback = {pwm_power_callback,             /* Callback function */
@@ -196,7 +204,7 @@ int main(void)
             
             case SWITCH_SHORT_PRESS:
                 /* Go to sleep */
-                cyhal_system_sleep();
+                cyhal_syspm_sleep();
 
                 /* Wait a bit to avoid glitches from the button press */
                 cyhal_system_delay_ms(LONG_GLITCH_DELAY_MS);
@@ -204,7 +212,7 @@ int main(void)
 
             case SWITCH_LONG_PRESS:
                 /* Go to deep sleep */
-                cyhal_system_deepsleep();
+                cyhal_syspm_deepsleep();
 
                 /* Wait a bit to avoid glitches from the button press */
                 cyhal_system_delay_ms(LONG_GLITCH_DELAY_MS);
@@ -239,7 +247,7 @@ en_switch_event_t get_switch_event(void)
     while (cyhal_gpio_read(CYBSP_USER_BTN) == CYBSP_BTN_PRESSED)
     {
         /* Wait for 10 ms */
-        cyhal_system_delay_ms(10);
+        cyhal_system_delay_ms(USER_BTN_PRESS_DELAY);
 
         /* Increment counter. Each count represents 10 ms */
         pressCount++;
