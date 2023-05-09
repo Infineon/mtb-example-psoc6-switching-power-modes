@@ -10,7 +10,7 @@
 *
 *
 *******************************************************************************
-* Copyright 2019-2022, Cypress Semiconductor Corporation (an Infineon company) or
+* Copyright 2019-2023, Cypress Semiconductor Corporation (an Infineon company) or
 * an affiliate of Cypress Semiconductor Corporation.  All rights reserved.
 *
 * This software, including source code, documentation and related
@@ -55,7 +55,7 @@
 #define LONG_PRESS_COUNT        200u    /* press > 2 sec */
 
 /* PWM LED frequency constants (in Hz) */
-#define PWM_FAST_FREQ_HZ        5
+#define PWM_FAST_FREQ_HZ        10
 #define PWM_SLOW_FREQ_HZ        3
 #define PWM_DIM_FREQ_HZ         100
 
@@ -181,8 +181,9 @@ int main(void)
     cyhal_syspm_init();
 
     /* Power Management Callback registration */
-    cyhal_syspm_register_callback(&clk_callback);
     cyhal_syspm_register_callback(&pwm_callback);
+    cyhal_syspm_register_callback(&clk_callback);
+    
     
     for(;;)
     {
